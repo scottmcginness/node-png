@@ -41,6 +41,9 @@ class DynamicPngStack : public node::ObjectWrap {
     static void UV_PngEncode(uv_work_t *req);
     static void UV_PngEncodeAfter(uv_work_t *req);
     void construct_png_data(unsigned char *data, Point &top);
+    void construct_png_data_blend_add(unsigned char *data, Point &top);
+    float scale_clamp(int value);
+    int descale_clamp(float value);
 
 public:
     static void Initialize(v8::Handle<v8::Object> target);

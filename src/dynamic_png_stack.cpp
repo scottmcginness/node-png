@@ -42,7 +42,65 @@ DynamicPngStack::construct_png_data(unsigned char *data, Point &top)
                 *datap++ = *pngdatap++;
                 *datap++ = *pngdatap++;
                 *datap++ = *pngdatap++;
-                *datap++ = (buf_type == BUF_RGB || buf_type == BUF_BGR) ? 0x00 : *pngdatap++;
+                *datap++ = 0x00;
+            }
+        }
+    }
+}
+
+float
+DynamicPngStack::scale_clamp(int value)
+{
+    if (value >= 0xff)
+        return 1.0;
+    if (value <= 0x00)
+        return 0.0;
+    return (float)value / 0xff;
+}
+
+int
+DynamicPngStack::descale_clamp(float value)
+{
+    if (value > 1.0 - 1.0 / 0xff)
+        return 0xff;
+    if (value < 1.0 / 0xff)
+        return 0x00;
+    return (int)(value * 0xff);
+}
+
+void
+DynamicPngStack::construct_png_data_blend_add(unsigned char *data, Point &top)
+{
+    float r0, g0, b0, a0, r1, g1, b1, a1, r2, g2, b2, a2;
+    for (vPngi it = png_stack.begin(); it != png_stack.end(); ++it) {
+        Png *png = *it;
+        int start = (png->y - top.y)*width*4 + (png->x - top.x)*4;
+        unsigned char *pngdatap = png->data;
+        for (int i = 0; i < png->h; i++) {
+            unsigned char *datap = &data[start + i*width*4];
+            for (int j = 0; j < png->w; j++) {
+                r0 = scale_clamp(*(datap));
+                g0 = scale_clamp(*(datap+1));
+                b0 = scale_clamp(*(datap+2));
+                a0 = scale_clamp(*(datap+3));
+                r1 = scale_clamp(*(pngdatap++));
+                g1 = scale_clamp(*(pngdatap++));
+                b1 = scale_clamp(*(pngdatap++));
+                a1 = scale_clamp(*(pngdatap++));
+
+                a2 = (a0 + a1 * (1 - a0));
+                if (a2 < 1.0/0xff) {
+                    r2 = g2 = b2 = 0;
+                } else {
+                    r2 = (r1 * a1 + r0 * a0 * (1 - a1)) / a2;
+                    g2 = (g1 * a1 + g0 * a0 * (1 - a1)) / a2;
+                    b2 = (b1 * a1 + b0 * a0 * (1 - a1)) / a2;
+                }
+
+                *datap++ = descale_clamp(r2);
+                *datap++ = descale_clamp(g2);
+                *datap++ = descale_clamp(b2);
+                *datap++ = descale_clamp(a2);
             }
         }
     }
@@ -100,9 +158,15 @@ DynamicPngStack::PngEncodeSync()
 
     unsigned char *data = (unsigned char*)malloc(sizeof(*data) * width * height * 4);
     if (!data) return VException("malloc failed in DynamicPngStack::PngEncode");
-    memset(data, 0xFF, width*height*4);
 
-    construct_png_data(data, top);
+    if (buf_type == BUF_RGB || buf_type == BUF_BGR) {
+        memset(data, 0xFF, width*height*4);
+        construct_png_data(data, top);
+    }
+    else {
+        memset(data, 0x00, width*height*4);
+        construct_png_data_blend_add(data, top);
+    }
 
     buffer_type pbt = (buf_type == BUF_BGR || buf_type == BUF_BGRA) ? BUF_BGRA : BUF_RGBA;
 
@@ -245,9 +309,15 @@ DynamicPngStack::UV_PngEncode(uv_work_t *req)
         enc_req->error = strdup("malloc failed in DynamicPngStack::UV_PngEncode.");
         return;
     }
-    memset(data, 0xFF, png->width*png->height*4);
 
-    png->construct_png_data(data, top);
+    if (png->buf_type == BUF_RGB || png->buf_type == BUF_BGR) {
+        memset(data, 0xFF, png->width*png->height*4);
+        png->construct_png_data(data, top);
+    }
+    else {
+        memset(data, 0x00, png->width*png->height*4);
+        png->construct_png_data_blend_add(data, top);
+    }
 
     buffer_type pbt = (png->buf_type == BUF_BGR || png->buf_type == BUF_BGRA) ?
         BUF_BGRA : BUF_RGBA;
